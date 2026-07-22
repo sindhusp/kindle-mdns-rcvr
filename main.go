@@ -1,6 +1,7 @@
-package main;
+package main
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -14,6 +15,16 @@ const myQuestion = "kindle.local"
 1. join mdns broadcast group
 2. print every package received
  */
+
+/** todo before release:
+- make it configurable
+- make it a daemon
+- what happens when the kindle sleeps?
+- should this just be a binary we need to scp onto kindle, or should i try to make it a KUAL extension?
+- logs / debugging?
+- word about compiling
+ */
+
 func main() {
 	fmt.Println("Hello")
 	port := 5353
@@ -33,15 +44,15 @@ func main() {
 	// make it a flag so if others find a problem, they can run ifconfig on their kindle and replace this param
 	conn, err := net.ListenMulticastUDP("udp4", nil, groupAddr)
 	if err != nil {
-		log.Fatal(err);
+		log.Fatal(err)
 		//todo: error handling
 	}
-	buff := make([]byte, 65536);
-	oob := make([]byte, 65536); //fixme: overallocation but what is the right number?
+	buff := make([]byte, 65536)
+	oob := make([]byte, 65536) //fixme: overallocation but what is the right number?
 	for {
 		n, _, _, _, err := conn.ReadMsgUDP(buff, oob)
-		if (err != nil) {
-			log.Fatal(err);
+		if err != nil {
+			log.Fatal(err)
 		}
 		//decoded := make([]byte, n);
 		//decodedStr := hex.Dump(decoded)
@@ -51,12 +62,13 @@ func main() {
 		header := buff[:mdnsPacketHeaderLength]
 		//txnId := header[:2] //todo: if non-zero, its a unicast query, how to respond?
 		qrBit := getBit(header[2], 7)
-		if (qrBit == 1) {
+		if qrBit == 1 {
 			// not a question
 			fmt.Println("this packet is not a query, skipping...")
 			continue
 		}
-		////qcount := buff[4:6]
+		qCount := binary.BigEndian.Uint16(buff[4:6])
+
 		//var indexQEnd int
 		//
 		//for i, b := range buff[12:] {
@@ -69,7 +81,7 @@ func main() {
 		//question := buff[12:12+indexQEnd]
 
 		//lengthByte := buff[12:13]
-		name, _, _ := parseName(buff, 12);
+		names, _, _ := parseNames(buff, 12, qCount)
 		fmt.Println("this packet is querying ", name)
 		ip, err = ipForInterface(ifi)
 		fmt.Println("response: ", makeResponse(ip))
@@ -139,32 +151,102 @@ func encodeName(name string) []byte {
 
 //TODO: compressed ptrs not implemented yet
 //TODO: multiple queries in the same packet not implemented yet
-func parseName(buf []byte, offset int) (string, int, error) {
-	var labels []string
+
+/**
+- to implement compressed pointers
+1. understand when the byte is a compressed ptr. first 2 bits are id.
+whole msg incl id will be 2 bytes. 2 * 8 -> 16 bits. so 14 bits to rep offset space. offset starts from the beginning of the msg.
+keep a map of label read so far to offset start.
+
+3 formats to consider
+- whole thing is a ptr -> 11 25 -> im a label ptr, im asking for the thing at 25. whats at 25? length followed by labels till root.
+- here's the issue: the whole thing needs a stack i think. whenever a label is id'd it needs to be mapped. but the whole domain name needs to be mapped as well
+- its a set of labels followed by a ptr
+- its a set of labels followed by root. (handled)
+*/
+func parseNames(buf []byte, offset int, qCount uint16) ([]string, int) {
+	offsetMap := make(map[int]string)
+	var names []string
+	for qCount > 0 {
+		name, nextOffset, err := parseName(buf, offset, offsetMap)
+		if err != nil {
+			return names, nextOffset
+		}
+		names = append(names, name)
+		qCount--
+		offset = nextOffset
+	}
+	return names, offset
+}
+
+func parseName(buf []byte, offset int, offsetMap map[int]string) (string, int, error) {
 	i := offset
+	startOfLabel := i
+	var labels []string
+	var offsets []int
 	for {
 		if i >= len(buf) {
-			return "", 0, fmt.Errorf("name overran buffer at %d", i)
+			return "", i, fmt.Errorf("name overran buffer at %d", i)
 		}
 		length := int(buf[i]) // the length octet
 		i++                   // step over the length octet itself
 
 		if length == 0 { // zero-length octet = root label = name is done
+			copyMap(offsetMap, buildOffsetMap(offsets, labels))
 			break
 		}
-		if length >= 0xC0 { // top two bits set = compression pointer
+		if length >= 0xC0 { // top two bits set = compression pointer.
+			//fixme: do exact 2 bit eq comparison for forward compatibility
 			return "", 0, fmt.Errorf("compression pointer TODO")
 			// later: 14-bit offset from these 2 bytes, jump there, but leave i just past them
 		}
 		end := i + length
 		if end > len(buf) {
-			return "", 0, fmt.Errorf("label len %d overruns buffer", length)
+			//fixme: is returning i correct?
+			return "", i, fmt.Errorf("label len %d overruns buffer", length)
 		}
-		labels = append(labels, string(buf[i:end])) // the label's bytes
-		i = end                                      // advance past this label
+		thisLabel := string(buf[i:end])
+		offsets = append(offsets, startOfLabel)
+		labels = append(labels, thisLabel) // the label's bytes
+		i = end                            // advance past this label
+		startOfLabel = i
 	}
+	/**
+	kindle, local
+	0, 6
+	*/
 	return strings.Join(labels, "."), i, nil
 }
+
+func copyMap(to map[int]string, from map[int]string) {
+	for key, value := range from {
+		to[key] = value
+	}
+}
+
+func buildOffsetMap(offsets []int, labels []string) map[int]string {
+	//todo: will there be at least one offset?
+	if len(offsets) == 0 || len(labels) == 0 {
+		return nil
+	}
+
+	var label string
+	j := len(offsets) - 1
+	offsetToLabelMap := make(map[int]string, 10)
+	label = labels[j]
+	offsetToLabelMap[offsets[j]] = label
+	j--
+
+	for j >= 0 {
+		// take prev label at labels[j] append that with written label so far.
+		label = labels[j] + "." + label
+		offsetToLabelMap[offsets[j]] = label
+		j--
+	}
+	return offsetToLabelMap
+}
+
+
 
 func getBit(b byte, position int) int {
 	// Shift target bit to the lowest position and mask with 1
