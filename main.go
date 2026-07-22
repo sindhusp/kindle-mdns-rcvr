@@ -22,11 +22,12 @@ func main() {
 		IP: ip,
 		Port: port,
 	}
-	ifi, err := net.InterfaceByName("en0")
+	ifi, err := net.InterfaceByName("wlan0")
 	if err != nil {
 		fmt.Println("no interface with this name")
 		//todo: error handling
 	}
+
 	//fixme:
 	// before running this on kindle, verify that wifi network is called wlan0.
 	// make it a flag so if others find a problem, they can run ifconfig on their kindle and replace this param
