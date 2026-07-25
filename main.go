@@ -33,7 +33,7 @@ func main() {
 		IP: ip,
 		Port: port,
 	}
-	ifi, err := net.InterfaceByName("wlan0")
+	ifi, err := net.InterfaceByName("en0")
 	if err != nil {
 		fmt.Println("no interface with this name")
 		//todo: error handling
@@ -42,23 +42,27 @@ func main() {
 	//fixme:
 	// before running this on kindle, verify that wifi network is called wlan0.
 	// make it a flag so if others find a problem, they can run ifconfig on their kindle and replace this param
-	conn, err := net.ListenMulticastUDP("udp4", nil, groupAddr)
+	conn, err := net.ListenMulticastUDP("udp4", ifi, groupAddr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("no conn established", err) // Todo: make a note of this in the docs
 		//todo: error handling
 	}
 	buff := make([]byte, 65536)
-	oob := make([]byte, 65536) //fixme: overallocation but what is the right number?
+	oob := make([]byte, 1024)
 	for {
 		n, _, _, _, err := conn.ReadMsgUDP(buff, oob)
 		if err != nil {
-			log.Fatal(err)
+			fmt.Println("couldn't read from the connection")
+			continue
 		}
 		//decoded := make([]byte, n);
 		//decodedStr := hex.Dump(decoded)
 
-		fmt.Printf(hex.Dump(buff[:n]))
-
+		fmt.Print(hex.Dump(buff[:n]))
+		if mdnsPacketHeaderLength > n {
+			fmt.Println("packet too short, skipping...")
+			continue
+		}
 		header := buff[:mdnsPacketHeaderLength]
 		//txnId := header[:2] //todo: if non-zero, its a unicast query, how to respond?
 		qrBit := getBit(header[2], 7)
@@ -81,20 +85,28 @@ func main() {
 		//question := buff[12:12+indexQEnd]
 
 		//lengthByte := buff[12:13]
-		names, _, _ := parseNames(buff, 12, qCount)
-		fmt.Println("this packet is querying ", name)
-		ip, err = ipForInterface(ifi)
-		fmt.Println("response: ", makeResponse(ip))
+		names, _, err := parseNames(buff[:n], 12, qCount)
+		if err != nil {
+			fmt.Println("couldn't parse names. Skipping with err", err)
+			continue
+		}
+		for _, name := range names {
+			if !strings.EqualFold(name, myQuestion) {
+				fmt.Println("Querying someone else's name:", name)
+				continue
+			}
 
-		if strings.EqualFold(name, myQuestion) {
+			ip, err = ipForInterface(ifi)
+			if err != nil {
+				fmt.Print("Couldn't find ip for interface, skipping") //todo: when will this actually happen, if ifi is null?
+				continue
+			}
 			fmt.Println("Yes! Someone wants to know my IP!")
 			resp := makeResponse(ip)
 			_, err := conn.WriteToUDP(resp, groupAddr)
 			if err != nil {
 				log.Println("failed to send response:", err)
 			}
-		} else {
-			fmt.Println("Querying someone else's name:", name)
 		}
 	}
 }
@@ -149,9 +161,6 @@ func encodeName(name string) []byte {
 	return result
 }
 
-//TODO: compressed ptrs not implemented yet
-//TODO: multiple queries in the same packet not implemented yet
-
 /**
 - to implement compressed pointers
 1. understand when the byte is a compressed ptr. first 2 bits are id.
@@ -164,89 +173,62 @@ keep a map of label read so far to offset start.
 - its a set of labels followed by a ptr
 - its a set of labels followed by root. (handled)
 */
-func parseNames(buf []byte, offset int, qCount uint16) ([]string, int) {
-	offsetMap := make(map[int]string)
+func parseNames(buf []byte, offset int, qCount uint16) ([]string, int, error) {
 	var names []string
 	for qCount > 0 {
-		name, nextOffset, err := parseName(buf, offset, offsetMap)
+		name, nextOffset, err := parseName(buf, offset)
 		if err != nil {
-			return names, nextOffset
+			return nil, 0, err
 		}
 		names = append(names, name)
 		qCount--
-		offset = nextOffset
+		offset = nextOffset + 4
 	}
-	return names, offset
+	return names, offset, nil
 }
 
-func parseName(buf []byte, offset int, offsetMap map[int]string) (string, int, error) {
+func parseName(buf []byte, offset int) (string, int, error) {
 	i := offset
-	startOfLabel := i
 	var labels []string
-	var offsets []int
 	for {
 		if i >= len(buf) {
-			return "", i, fmt.Errorf("name overran buffer at %d", i)
+			return "", 0, fmt.Errorf("name overran buffer at %d", i)
 		}
-		length := int(buf[i]) // the length octet
-		i++                   // step over the length octet itself
-
-		if length == 0 { // zero-length octet = root label = name is done
-			copyMap(offsetMap, buildOffsetMap(offsets, labels))
+		length := int(buf[i])
+		if length == 0 {
+			i++
 			break
 		}
 		if length >= 0xC0 { // top two bits set = compression pointer.
-			//fixme: do exact 2 bit eq comparison for forward compatibility
-			return "", 0, fmt.Errorf("compression pointer TODO")
-			// later: 14-bit offset from these 2 bytes, jump there, but leave i just past them
+			// fixme: do exact 2 bit eq comparison for forward compatibility
+			if i+2 > len(buf) {
+				return "", 0, fmt.Errorf("name overran buffer at %d", i)
+			}
+			ptrOffset := binary.BigEndian.Uint16(buf[i:i+2])
+			ptrOffset = ptrOffset & 0x3FFF
+			if int(ptrOffset) >= offset { // must point strictly backward
+				return "", 0, fmt.Errorf("non-backward pointer %d", ptrOffset)
+			}
+			suffix, _, err := parseName(buf, int(ptrOffset))
+			if err != nil {
+				return "", 0, err
+			}
+			name := strings.Join(append(labels, suffix), ".")
+			fmt.Println("I see a compressed name! ", name)
+			return name, i + 2, nil
 		}
+		i++
 		end := i + length
 		if end > len(buf) {
-			//fixme: is returning i correct?
-			return "", i, fmt.Errorf("label len %d overruns buffer", length)
+			return "", 0, fmt.Errorf("label len %d overruns buffer", length)
 		}
 		thisLabel := string(buf[i:end])
-		offsets = append(offsets, startOfLabel)
-		labels = append(labels, thisLabel) // the label's bytes
-		i = end                            // advance past this label
-		startOfLabel = i
+		labels = append(labels, thisLabel)
+		i = end
 	}
-	/**
-	kindle, local
-	0, 6
-	*/
+
 	return strings.Join(labels, "."), i, nil
 }
-
-func copyMap(to map[int]string, from map[int]string) {
-	for key, value := range from {
-		to[key] = value
-	}
-}
-
-func buildOffsetMap(offsets []int, labels []string) map[int]string {
-	//todo: will there be at least one offset?
-	if len(offsets) == 0 || len(labels) == 0 {
-		return nil
-	}
-
-	var label string
-	j := len(offsets) - 1
-	offsetToLabelMap := make(map[int]string, 10)
-	label = labels[j]
-	offsetToLabelMap[offsets[j]] = label
-	j--
-
-	for j >= 0 {
-		// take prev label at labels[j] append that with written label so far.
-		label = labels[j] + "." + label
-		offsetToLabelMap[offsets[j]] = label
-		j--
-	}
-	return offsetToLabelMap
-}
-
-
 
 func getBit(b byte, position int) int {
 	// Shift target bit to the lowest position and mask with 1
