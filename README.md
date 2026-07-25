@@ -36,7 +36,7 @@ If you manage Go through gvm (because the newer go versions do not support the k
 GOROOT=~/.gvm/go CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5 \
   ~/.gvm/go/bin/go build -o kindle-mdns-rcvr .
 ```
-I recommend Go16 for Kindle pw4. You can choose a version by looking up the kindle's linux version and checking if your Go version supports that version.
+I recommend Go16 for Kindle K4. You can choose a version by looking up the kindle's linux version and checking if your Go version supports that version.
 
 Then copy it over and run it (you'll need the IP the first time and every time you reboot):
 
@@ -71,7 +71,7 @@ ping kindle.local
 4. To kill, ps ax. Find pid. then run `kill pid`
 
 ## Release
-[Here's](https://github.com/sindhusp/kindle-mdns-rcvr/blob/master/kindle-mdns-rcvr) a binary built for my jailbroken kindle PW4 running 4.1.4 firmware. If you are on the same device, download it and move it over to your kindle. Follow the instructions [here](#Running)
+[Here's](https://github.com/sindhusp/kindle-mdns-rcvr/blob/master/kindle-mdns-rcvr) a binary built for my jailbroken kindle K4 running 4.1.4 firmware. If you are on the same device, download it and move it over to your kindle. Follow the instructions [here](#Running)
 
 ## Gotchas
 
