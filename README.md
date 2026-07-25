@@ -40,7 +40,7 @@ I recommend Go16 for Kindle pw4. You can choose a version by looking up the kind
 
 Then copy it over and run it (you'll need the IP the first time and every time you reboot):
 
-##Running
+## Running
 ```sh
 scp kindle-mdns-rcvr root@<kindle-ip>:/mnt/us/
 ssh root@<kindle-ip>  
@@ -57,7 +57,7 @@ ping kindle.local
 
 
 
-##Make it a daemon
+## Make it a daemon
 1. make your kindle writable - `mntroot rw`
 2. move binary - `mv /mnt/usr/kindle-mdns-rcvr /usr/local/bin`
 3. Make it a daemon with kindle's start-stop 
@@ -70,7 +70,7 @@ ping kindle.local
 ```
 4. To kill, ps ax. Find pid. then run `kill pid`
 
-##Release
+## Release
 [Here's](https://github.com/sindhusp/kindle-mdns-rcvr/blob/master/kindle-mdns-rcvr) a binary built for my jailbroken kindle PW4 running 4.1.4 firmware. If you are on the same device, download it and move it over to your kindle. Follow the instructions [here](#Running)
 
 ## Gotchas
