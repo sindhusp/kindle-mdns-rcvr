@@ -5,7 +5,7 @@
 An mDNS responder for a jailbroken Kindle, written in Go with no dependencies
 outside the standard library.
 
-To ssh into a jailbroken kindle, we need its IP or usbNet. But IP can change. We need a way to connect our kindle with a domain such as `kindle.local`. This receiver solves that problem.  
+To ssh into a jailbroken kindle, we need its IP or usbNet. But the IP can change. We need a way to connect our kindle with a domain such as `kindle.local`. This receiver solves that problem.  
 
 You have to look up the IP on your router every time you want to
 `ssh` in. You can set a static IP on your router but not everyone has access to their router. Besides where is the fun in that! 
@@ -30,7 +30,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5 go build -o kindle-mdns-rcvr .
   up your own model and adjust (run `uname -m` on your kindle to find out): a binary built for a higher ARM version will
   fail to start on older hardware.
 
-If you manage Go through gvm (because the latter go versions do not support the kindle's linux versions), point at that toolchain explicitly:
+If you manage Go through gvm (because the newer go versions do not support the kindle's linux versions), point at that toolchain explicitly:
 
 ```sh
 GOROOT=~/.gvm/go CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5 \
