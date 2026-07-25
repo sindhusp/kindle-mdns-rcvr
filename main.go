@@ -33,7 +33,7 @@ func main() {
 		IP: ip,
 		Port: port,
 	}
-	ifi, err := net.InterfaceByName("en0")
+	ifi, err := net.InterfaceByName("wlan0")
 	if err != nil {
 		fmt.Println("no interface with this name")
 		//todo: error handling
