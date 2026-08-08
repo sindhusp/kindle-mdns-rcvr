@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -10,14 +11,8 @@ import (
 )
 
 const mdnsPacketHeaderLength = 12
-const myQuestion = "kindle.local"
-/**
-1. join mdns broadcast group
-2. print every package received
- */
 
 /** todo before release:
-- make it configurable
 - make it a daemon
 - what happens when the kindle sleeps?
 - should this just be a binary we need to scp onto kindle, or should i try to make it a KUAL extension?
@@ -26,22 +21,21 @@ const myQuestion = "kindle.local"
  */
 
 func main() {
-	fmt.Println("Hello")
+	interfaceName := flag.String("interface", "wlan0", "the interface you want to broadcast your IP to")
+	domainName := flag.String("domain", "kindle.local", "the domain name for your kindle")
+	flag.Parse()
 	port := 5353
 	ip := net.IPv4(224, 0, 0, 251)
 	groupAddr := &net.UDPAddr {
 		IP: ip,
 		Port: port,
 	}
-	ifi, err := net.InterfaceByName("wlan0")
+	ifi, err := net.InterfaceByName(*interfaceName)
 	if err != nil {
-		fmt.Println("no interface with this name")
+		fmt.Printf("no interface with this name %s", *interfaceName)
 		//todo: error handling
 	}
 
-	//fixme:
-	// before running this on kindle, verify that wifi network is called wlan0.
-	// make it a flag so if others find a problem, they can run ifconfig on their kindle and replace this param
 	conn, err := net.ListenMulticastUDP("udp4", ifi, groupAddr)
 	if err != nil {
 		log.Fatal("no conn established", err) // Todo: make a note of this in the docs
@@ -73,25 +67,13 @@ func main() {
 		}
 		qCount := binary.BigEndian.Uint16(buff[4:6])
 
-		//var indexQEnd int
-		//
-		//for i, b := range buff[12:] {
-		//	if b == 0x00 {
-		//		indexQEnd = i
-		//		break
-		//	}
-		//}
-		//
-		//question := buff[12:12+indexQEnd]
-
-		//lengthByte := buff[12:13]
 		names, _, err := parseNames(buff[:n], 12, qCount)
 		if err != nil {
 			fmt.Println("couldn't parse names. Skipping with err", err)
 			continue
 		}
 		for _, name := range names {
-			if !strings.EqualFold(name, myQuestion) {
+			if !strings.EqualFold(name, *domainName) {
 				fmt.Println("Querying someone else's name:", name)
 				continue
 			}
@@ -102,7 +84,7 @@ func main() {
 				continue
 			}
 			fmt.Println("Yes! Someone wants to know my IP!")
-			resp := makeResponse(ip)
+			resp := makeResponse(ip, *domainName)
 			_, err := conn.WriteToUDP(resp, groupAddr)
 			if err != nil {
 				log.Println("failed to send response:", err)
@@ -111,7 +93,7 @@ func main() {
 	}
 }
 
-func makeResponse(ip net.IP) [] byte {
+func makeResponse(ip net.IP, domainName string) [] byte {
 	// mDNS responses set QR=1, AA=1, and — importantly — zero out the transaction ID.
 	// Unlike unicast DNS, mDNS responses do NOT echo the query's ID; they use 0x0000.
 	respHeader := make([]byte, 12)
@@ -126,7 +108,7 @@ func makeResponse(ip net.IP) [] byte {
 	//todo: make this static?
 
 	result = append(result, respHeader...)
-	result = append(result, encodeName(myQuestion)...)
+	result = append(result, encodeName(domainName)...)
 
 	result = append(result, 0x00, 0x01)             // TYPE  = A (0x0001)
 	result = append(result, 0x80, 0x01)             // CLASS = IN (0x0001) + cache-flush bit (0x8000)

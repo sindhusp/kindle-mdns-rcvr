@@ -55,6 +55,22 @@ ssh root@kindle.local
 ping kindle.local
 ```
 
+## Configuration
+
+If you run multiple kindles on your network, or wish to change the domain name being broadcast, you can pass the domain as a flag to the receiver binary. To do this, build using the instructions above. While running, do 
+```
+./kindle-mdns-rcvr -domain=whatevernameyouwant.local
+```
+
+## Gotchas
+
+- **The interface name is hardcoded to `wlan0`.** Run `ifconfig` on your Kindle
+  first; if the wifi interface is called wlan0, you can run the binary as is. Otherwise, if the WiFi interface has a different name, you'll need to pass a flag to the binary with your interfaceName.
+  Find your network by running ifconfig. Your local network will be listed an inet address starting "192.168". Find its name. It's usually en0. Pass that with -interface=en0 to the binary like
+```
+./kindle-mdns-rcvr -interface=en0
+```
+- Unicast queries are ignored for now. Also this is an mdns receiver, it doesn't announce itself unless queried.
 
 
 ## Make it a daemon
@@ -73,14 +89,6 @@ ping kindle.local
 ## Release
 [Here's](https://github.com/sindhusp/kindle-mdns-rcvr/blob/master/kindle-mdns-rcvr) a binary built for my jailbroken kindle K4 running 4.1.4 firmware. If you are on the same device, download it and move it over to your kindle. Follow the instructions [here](#Running)
 
-## Gotchas
-
-
-- **The interface name is hardcoded to `wlan0`.** Run `ifconfig` on your Kindle
-  first; if the wifi interface is called wlan0, you can run this code as is. Otherwise, if the WiFi interface has a different name, you'll need to edit
-  `main.go` and rebuild.
-- **The name is hardcoded to `kindle.local`.**
-- Unicast queries are ignored for now. Also this is an mdns receiver, it doesn't announce itself unless queried.
 
 ## Extra
 - A note on integration: It's tricky for android browsers to connect to this domain `kindle.local` if you are running a server on your kindle as .local mdns resolution was recently introduced natively to android. It's straightforward on ios, go to your Safari browser and type http://kindle.local:<port>/ to connect
